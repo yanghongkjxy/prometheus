@@ -75,10 +75,15 @@ var (
 		Name:      "evaluator_iterations_skipped_total",
 		Help:      "The total number of rule group evaluations skipped due to throttled metric storage.",
 	})
+	iterationsMissed = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "evaluator_iterations_missed_total",
+		Help:      "The total number of rule group evaluations missed due to slow rule group evaluation.",
+	})
 	iterationsScheduled = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: namespace,
 		Name:      "evaluator_iterations_total",
-		Help:      "The total number of scheduled rule group evaluations, whether skipped or executed.",
+		Help:      "The total number of scheduled rule group evaluations, whether executed, missed or skipped.",
 	})
 )
 
@@ -89,7 +94,9 @@ func init() {
 	evalFailures.WithLabelValues(string(ruleTypeRecording))
 
 	prometheus.MustRegister(iterationDuration)
+	prometheus.MustRegister(iterationsScheduled)
 	prometheus.MustRegister(iterationsSkipped)
+	prometheus.MustRegister(iterationsMissed)
 	prometheus.MustRegister(evalFailures)
 	prometheus.MustRegister(evalDuration)
 }
@@ -106,7 +113,7 @@ const (
 type Rule interface {
 	Name() string
 	// eval evaluates the rule, including any associated recording or alerting actions.
-	Eval(context.Context, model.Time, *promql.Engine, string) (model.Vector, error)
+	Eval(context.Context, model.Time, *promql.Engine, *url.URL) (model.Vector, error)
 	// String returns a human-readable string representation of the rule.
 	String() string
 	// HTMLSnippet returns a human-readable string representation of the rule,
@@ -158,6 +165,7 @@ func (g *Group) run() {
 
 		iterationDuration.Observe(time.Since(start).Seconds())
 	}
+	lastTriggered := time.Now()
 	iter()
 
 	tick := time.NewTicker(g.interval)
@@ -172,6 +180,12 @@ func (g *Group) run() {
 			case <-g.done:
 				return
 			case <-tick.C:
+				missed := (time.Since(lastTriggered).Nanoseconds() / g.interval.Nanoseconds()) - 1
+				if missed > 0 {
+					iterationsMissed.Add(float64(missed))
+					iterationsScheduled.Add(float64(missed))
+				}
+				lastTriggered = time.Now()
 				iter()
 			}
 		}
@@ -260,7 +274,7 @@ func (g *Group) Eval() {
 
 			evalTotal.WithLabelValues(rtyp).Inc()
 
-			vector, err := rule.Eval(g.opts.Context, now, g.opts.QueryEngine, g.opts.ExternalURL.Path)
+			vector, err := rule.Eval(g.opts.Context, now, g.opts.QueryEngine, g.opts.ExternalURL)
 			if err != nil {
 				// Canceled queries are intentional termination of queries. This normally
 				// happens on shutdown and thus we skip logging of any errors here.

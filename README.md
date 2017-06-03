@@ -58,7 +58,7 @@ Prometheus will now be reachable at http://localhost:9090/.
 ### Building from source
 
 To build Prometheus from the source code yourself you need to have a working
-Go environment with [version 1.5 or greater installed](http://golang.org/doc/install).
+Go environment with [version 1.8 or greater installed](http://golang.org/doc/install).
 
 You can directly use the `go` tool to download and install the `prometheus`
 and `promtool` binaries into your `GOPATH`. We use Go 1.5's experimental
@@ -81,6 +81,7 @@ The Makefile provides several targets:
 
   * *build*: build the `prometheus` and `promtool` binaries
   * *test*: run the tests
+  * *test-short*: run the short tests
   * *format*: format the source code
   * *vet*: check the source code for common errors
   * *assets*: rebuild the static assets

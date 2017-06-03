@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"time"
@@ -50,6 +51,7 @@ const (
 	errorCanceled           = "canceled"
 	errorExec               = "execution"
 	errorBadData            = "bad_data"
+	errorInternal           = "internal"
 )
 
 var corsHeaders = map[string]string{
@@ -73,7 +75,7 @@ type targetRetriever interface {
 }
 
 type alertmanagerRetriever interface {
-	Alertmanagers() []string
+	Alertmanagers() []*url.URL
 }
 
 type response struct {
@@ -101,8 +103,7 @@ type API struct {
 	targetRetriever       targetRetriever
 	alertmanagerRetriever alertmanagerRetriever
 
-	context func(r *http.Request) context.Context
-	now     func() model.Time
+	now func() model.Time
 }
 
 // NewAPI returns an initialized API type.
@@ -112,8 +113,7 @@ func NewAPI(qe *promql.Engine, st local.Storage, tr targetRetriever, ar alertman
 		Storage:               st,
 		targetRetriever:       tr,
 		alertmanagerRetriever: ar,
-		context:               route.Context,
-		now:                   model.Now,
+		now: model.Now,
 	}
 }
 
@@ -170,7 +170,7 @@ func (api *API) query(r *http.Request) (interface{}, *apiError) {
 		ts = api.now()
 	}
 
-	ctx := api.context(r)
+	ctx := r.Context()
 	if to := r.FormValue("timeout"); to != "" {
 		var cancel context.CancelFunc
 		timeout, err := parseDuration(to)
@@ -194,6 +194,8 @@ func (api *API) query(r *http.Request) (interface{}, *apiError) {
 			return nil, &apiError{errorCanceled, res.Err}
 		case promql.ErrQueryTimeout:
 			return nil, &apiError{errorTimeout, res.Err}
+		case promql.ErrStorage:
+			return nil, &apiError{errorInternal, res.Err}
 		}
 		return nil, &apiError{errorExec, res.Err}
 	}
@@ -234,7 +236,7 @@ func (api *API) queryRange(r *http.Request) (interface{}, *apiError) {
 		return nil, &apiError{errorBadData, err}
 	}
 
-	ctx := api.context(r)
+	ctx := r.Context()
 	if to := r.FormValue("timeout"); to != "" {
 		var cancel context.CancelFunc
 		timeout, err := parseDuration(to)
@@ -268,7 +270,7 @@ func (api *API) queryRange(r *http.Request) (interface{}, *apiError) {
 }
 
 func (api *API) labelValues(r *http.Request) (interface{}, *apiError) {
-	name := route.Param(api.context(r), "name")
+	name := route.Param(r.Context(), "name")
 
 	if !model.LabelNameRE.MatchString(name) {
 		return nil, &apiError{errorBadData, fmt.Errorf("invalid label name: %q", name)}
@@ -279,7 +281,7 @@ func (api *API) labelValues(r *http.Request) (interface{}, *apiError) {
 	}
 	defer q.Close()
 
-	vals, err := q.LabelValuesForLabelName(api.context(r), model.LabelName(name))
+	vals, err := q.LabelValuesForLabelName(r.Context(), model.LabelName(name))
 	if err != nil {
 		return nil, &apiError{errorExec, err}
 	}
@@ -331,7 +333,7 @@ func (api *API) series(r *http.Request) (interface{}, *apiError) {
 	}
 	defer q.Close()
 
-	res, err := q.MetricsForLabelMatchers(api.context(r), start, end, matcherSets...)
+	res, err := q.MetricsForLabelMatchers(r.Context(), start, end, matcherSets...)
 	if err != nil {
 		return nil, &apiError{errorExec, err}
 	}
@@ -427,8 +429,8 @@ func (api *API) alertmanagers(r *http.Request) (interface{}, *apiError) {
 	urls := api.alertmanagerRetriever.Alertmanagers()
 	ams := &AlertmanagerDiscovery{ActiveAlertmanagers: make([]*AlertmanagerTarget, len(urls))}
 
-	for i := range urls {
-		ams.ActiveAlertmanagers[i] = &AlertmanagerTarget{URL: urls[i]}
+	for i, url := range urls {
+		ams.ActiveAlertmanagers[i] = &AlertmanagerTarget{URL: url.String()}
 	}
 
 	return ams, nil
@@ -459,6 +461,8 @@ func respondError(w http.ResponseWriter, apiErr *apiError, data interface{}) {
 		code = 422
 	case errorCanceled, errorTimeout:
 		code = http.StatusServiceUnavailable
+	case errorInternal:
+		code = http.StatusInternalServerError
 	default:
 		code = http.StatusInternalServerError
 	}

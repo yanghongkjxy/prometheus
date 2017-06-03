@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/gce"
 	"github.com/prometheus/prometheus/discovery/kubernetes"
 	"github.com/prometheus/prometheus/discovery/marathon"
+	"github.com/prometheus/prometheus/discovery/openstack"
 	"github.com/prometheus/prometheus/discovery/triton"
 	"github.com/prometheus/prometheus/discovery/zookeeper"
 	"golang.org/x/net/context"
@@ -50,7 +51,7 @@ type TargetProvider interface {
 }
 
 // ProvidersFromConfig returns all TargetProviders configured in cfg.
-func ProvidersFromConfig(cfg config.ServiceDiscoveryConfig) map[string]TargetProvider {
+func ProvidersFromConfig(cfg config.ServiceDiscoveryConfig, logger log.Logger) map[string]TargetProvider {
 	providers := map[string]TargetProvider{}
 
 	app := func(mech string, i int, tp TargetProvider) {
@@ -58,59 +59,68 @@ func ProvidersFromConfig(cfg config.ServiceDiscoveryConfig) map[string]TargetPro
 	}
 
 	for i, c := range cfg.DNSSDConfigs {
-		app("dns", i, dns.NewDiscovery(c))
+		app("dns", i, dns.NewDiscovery(c, logger))
 	}
 	for i, c := range cfg.FileSDConfigs {
-		app("file", i, file.NewDiscovery(c))
+		app("file", i, file.NewDiscovery(c, logger))
 	}
 	for i, c := range cfg.ConsulSDConfigs {
-		k, err := consul.NewDiscovery(c)
+		k, err := consul.NewDiscovery(c, logger)
 		if err != nil {
-			log.Errorf("Cannot create Consul discovery: %s", err)
+			logger.Errorf("Cannot create Consul discovery: %s", err)
 			continue
 		}
 		app("consul", i, k)
 	}
 	for i, c := range cfg.MarathonSDConfigs {
-		m, err := marathon.NewDiscovery(c)
+		m, err := marathon.NewDiscovery(c, logger)
 		if err != nil {
-			log.Errorf("Cannot create Marathon discovery: %s", err)
+			logger.Errorf("Cannot create Marathon discovery: %s", err)
 			continue
 		}
 		app("marathon", i, m)
 	}
 	for i, c := range cfg.KubernetesSDConfigs {
-		k, err := kubernetes.New(log.Base(), c)
+		k, err := kubernetes.New(logger, c)
 		if err != nil {
-			log.Errorf("Cannot create Kubernetes discovery: %s", err)
+			logger.Errorf("Cannot create Kubernetes discovery: %s", err)
 			continue
 		}
 		app("kubernetes", i, k)
 	}
 	for i, c := range cfg.ServersetSDConfigs {
-		app("serverset", i, zookeeper.NewServersetDiscovery(c))
+		app("serverset", i, zookeeper.NewServersetDiscovery(c, logger))
 	}
 	for i, c := range cfg.NerveSDConfigs {
-		app("nerve", i, zookeeper.NewNerveDiscovery(c))
+		app("nerve", i, zookeeper.NewNerveDiscovery(c, logger))
 	}
 	for i, c := range cfg.EC2SDConfigs {
-		app("ec2", i, ec2.NewDiscovery(c))
+		app("ec2", i, ec2.NewDiscovery(c, logger))
 	}
-	for i, c := range cfg.GCESDConfigs {
-		gced, err := gce.NewDiscovery(c)
+	for i, c := range cfg.OpenstackSDConfigs {
+		openstackd, err := openstack.NewDiscovery(c)
 		if err != nil {
-			log.Errorf("Cannot initialize GCE discovery: %s", err)
+			log.Errorf("Cannot initialize OpenStack discovery: %s", err)
+			continue
+		}
+		app("openstack", i, openstackd)
+	}
+
+	for i, c := range cfg.GCESDConfigs {
+		gced, err := gce.NewDiscovery(c, logger)
+		if err != nil {
+			logger.Errorf("Cannot initialize GCE discovery: %s", err)
 			continue
 		}
 		app("gce", i, gced)
 	}
 	for i, c := range cfg.AzureSDConfigs {
-		app("azure", i, azure.NewDiscovery(c))
+		app("azure", i, azure.NewDiscovery(c, logger))
 	}
 	for i, c := range cfg.TritonSDConfigs {
-		t, err := triton.New(log.With("sd", "triton"), c)
+		t, err := triton.New(logger.With("sd", "triton"), c)
 		if err != nil {
-			log.Errorf("Cannot create Triton discovery: %s", err)
+			logger.Errorf("Cannot create Triton discovery: %s", err)
 			continue
 		}
 		app("triton", i, t)
@@ -217,11 +227,6 @@ func (ts *TargetSet) UpdateProviders(p map[string]TargetProvider) {
 }
 
 func (ts *TargetSet) updateProviders(ctx context.Context, providers map[string]TargetProvider) {
-	// Lock for the entire time. This may mean up to 5 seconds until the full initial set
-	// is retrieved and applied.
-	// We could release earlier with some tweaks, but this is easier to reason about.
-	ts.mtx.Lock()
-	defer ts.mtx.Unlock()
 
 	// Stop all previous target providers of the target set.
 	if ts.cancelProviders != nil {
@@ -233,7 +238,9 @@ func (ts *TargetSet) updateProviders(ctx context.Context, providers map[string]T
 	// (Re-)create a fresh tgroups map to not keep stale targets around. We
 	// will retrieve all targets below anyway, so cleaning up everything is
 	// safe and doesn't inflict any additional cost.
+	ts.mtx.Lock()
 	ts.tgroups = map[string]*config.TargetGroup{}
+	ts.mtx.Unlock()
 
 	for name, prov := range providers {
 		wg.Add(1)
@@ -292,9 +299,6 @@ func (ts *TargetSet) updateProviders(ctx context.Context, providers map[string]T
 
 // update handles a target group update from a target provider identified by the name.
 func (ts *TargetSet) update(name string, tgroup *config.TargetGroup) {
-	ts.mtx.Lock()
-	defer ts.mtx.Unlock()
-
 	ts.setTargetGroup(name, tgroup)
 
 	select {
@@ -304,6 +308,9 @@ func (ts *TargetSet) update(name string, tgroup *config.TargetGroup) {
 }
 
 func (ts *TargetSet) setTargetGroup(name string, tg *config.TargetGroup) {
+	ts.mtx.Lock()
+	defer ts.mtx.Unlock()
+
 	if tg == nil {
 		return
 	}
