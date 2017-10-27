@@ -1,3 +1,85 @@
+## 2.0.0-rc.2 / 2017-10-25
+
+* [ENHANCEMENT] handle WAL segments with corrupted header gracefully
+* [ENHANCEMENT] stabilize memory usage during WAL replay
+* [CHANGE] Prefix all storage metrics with `prometheus_`
+* [BUGFIX] Correctly handle label removal in remote read
+* [BUGFIX] Fix chunk misalignment causing out-of-order samples
+* [BUGFIX] Fix connection leak in Consul SD
+* [BUGFIX] Handle invalid chunk derefernces gracefully
+* [BUGFIX] Prevent potential deadlock during failing querier construction
+
+Data written in previous pre-release versions may have been affected by the out-of-order
+bug. Reading this data may reveal artefacts and incorrect data.
+Starting with a clean storage directory is advised. The WAL directory may safely be kept.
+
+
+## 1.8.0 / 2017-10-06
+
+* [CHANGE] Rule links link to the _Console_ tab rather than the _Graph_ tab to
+  not trigger expensive range queries by default.
+* [FEATURE] Ability to act as a remote read endpoint for other Prometheus
+  servers.
+* [FEATURE] K8s SD: Support discovery of ingresses.
+* [FEATURE] Consul SD: Support for node metadata.
+* [FEATURE] Openstack SD: Support discovery of hypervisors.
+* [FEATURE] Expose current Prometheus config via `/status/config`.
+* [FEATURE] Allow to collapse jobs on `/targets` page.
+* [FEATURE] Add `/-/healthy` and `/-/ready` endpoints.
+* [FEATURE] Add color scheme support to console templates.
+* [ENHANCEMENT] Remote storage connections use HTTP keep-alive.
+* [ENHANCEMENT] Improved logging about remote storage.
+* [ENHANCEMENT] Relaxed URL validation.
+* [ENHANCEMENT] Openstack SD: Handle instances without IP.
+* [ENHANCEMENT] Make remote storage queue manager configurable.
+* [ENHANCEMENT] Validate metrics returned from remote read.
+* [ENHANCEMENT] EC2 SD: Set a default region.
+* [ENHANCEMENT] Changed help link to `https://prometheus.io/docs`.
+* [BUGFIX] Fix floating-point precision issue in `deriv` function.
+* [BUGFIX] Fix pprof endpoints when -web.route-prefix or -web.external-url is
+  used.
+* [BUGFIX] Fix handling of `null` target groups in file-based SD.
+* [BUGFIX] Set the sample timestamp in date-related PromQL functions.
+* [BUGFIX] Apply path prefix to redirect from deprecated graph URL.
+* [BUGFIX] Fixed tests on MS Windows.
+* [BUGFIX] Check for invalid UTF-8 in label values after relabeling.
+
+## 1.7.2 / 2017-09-26
+
+* [BUGFIX] Correctly remove all targets from DNS service discovery if the
+  corresponding DNS query succeeds and returns an empty result.
+* [BUGFIX] Correctly parse resolution input in expression browser.
+* [BUGFIX] Consistently use UTC in the date picker of the expression browser.
+* [BUGFIX] Correctly handle multiple ports in Marathon service discovery.
+* [BUGFIX] Fix HTML escaping so that HTML templates compile with Go1.9.
+* [BUGFIX] Prevent number of remote write shards from going negative.
+* [BUGFIX] In the graphs created by the expression browser, render very large
+  and small numbers in a readable way.
+* [BUGFIX] Fix a rarely occurring iterator issue in varbit encoded chunks.
+
+## 1.7.1 / 2017-06-12
+
+* [BUGFIX] Fix double prefix redirect.
+
+## 1.7.0 / 2017-06-06
+
+* [CHANGE] Compress remote storage requests and responses with unframed/raw snappy.
+* [CHANGE] Properly ellide secrets in config.
+* [FEATURE] Add OpenStack service discovery.
+* [FEATURE] Add ability to limit Kubernetes service discovery to certain namespaces.
+* [FEATURE] Add metric for discovered number of Alertmanagers.
+* [ENHANCEMENT] Print system information (uname) on start up.
+* [ENHANCEMENT] Show gaps in graphs on expression browser.
+* [ENHANCEMENT] Promtool linter checks counter naming and more reserved labels.
+* [BUGFIX] Fix broken Mesos discovery.
+* [BUGFIX] Fix redirect when external URL is set.
+* [BUGFIX] Fix mutation of active alert elements by notifier.
+* [BUGFIX] Fix HTTP error handling for remote write.
+* [BUGFIX] Fix builds for Solaris/Illumos.
+* [BUGFIX] Fix overflow checking in global config.
+* [BUGFIX] Fix log level reporting issue.
+* [BUGFIX] Fix ZooKeeper serverset discovery can become out-of-sync.
+
 ## 1.6.3 / 2017-05-18
 
 * [BUGFIX] Fix disappearing Alertmanger targets in Alertmanager discovery.

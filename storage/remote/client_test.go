@@ -9,7 +9,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.package remote
+// limitations under the License.
 
 package remote
 
@@ -19,12 +19,16 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
+	"github.com/prometheus/prometheus/prompb"
 )
+
+var longErrMessage = strings.Repeat("error message", maxErrMsgLen)
 
 func TestStoreHTTPErrorHandling(t *testing.T) {
 	tests := []struct {
@@ -37,38 +41,41 @@ func TestStoreHTTPErrorHandling(t *testing.T) {
 		},
 		{
 			code: 300,
-			err:  fmt.Errorf("server returned HTTP status 300 Multiple Choices"),
+			err:  fmt.Errorf("server returned HTTP status 300 Multiple Choices: " + longErrMessage[:maxErrMsgLen]),
 		},
 		{
 			code: 404,
-			err:  fmt.Errorf("server returned HTTP status 404 Not Found"),
+			err:  fmt.Errorf("server returned HTTP status 404 Not Found: " + longErrMessage[:maxErrMsgLen]),
 		},
 		{
 			code: 500,
-			err:  recoverableError{fmt.Errorf("server returned HTTP status 500 Internal Server Error")},
+			err:  recoverableError{fmt.Errorf("server returned HTTP status 500 Internal Server Error: " + longErrMessage[:maxErrMsgLen])},
 		},
 	}
 
 	for i, test := range tests {
 		server := httptest.NewServer(
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				http.Error(w, "test error", test.code)
+				http.Error(w, longErrMessage, test.code)
 			}),
 		)
 
 		serverURL, err := url.Parse(server.URL)
 		if err != nil {
-			panic(err)
+			t.Fatal(err)
 		}
 
-		c, err := NewClient(0, &clientConfig{
-			url:     &config.URL{serverURL},
-			timeout: model.Duration(time.Second),
+		c, err := NewClient(0, &ClientConfig{
+			URL:     &config.URL{URL: serverURL},
+			Timeout: model.Duration(time.Second),
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		err = c.Store(nil)
+		err = c.Store(&prompb.WriteRequest{})
 		if !reflect.DeepEqual(err, test.err) {
-			t.Fatalf("%d. Unexpected error; want %v, got %v", i, test.err, err)
+			t.Errorf("%d. Unexpected error; want %v, got %v", i, test.err, err)
 		}
 
 		server.Close()
